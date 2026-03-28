@@ -1,0 +1,149 @@
+# SKILL: 3D 의뢰파일 서버 저장 (에어테이블 연동)
+
+## 트리거
+- "N번 행 저장해줘"
+- "에어테이블 N번 폴더 만들어줘"
+- "저장해줘" (받은함 파일만 있을 때)
+- "N번 행 파일도 같이 저장해줘"
+- 사용자가 에어테이블 행을 텍스트로 붙여넣었을 때 (탭 구분 텍스트)
+
+---
+
+## 사전 준비 (최초 1회만)
+`config.json`에 아래 값이 채워져 있는지 확인한다:
+- `airtable_api_key`
+- `airtable_base_id`
+- `airtable_table_name`
+채워져 있지 않으면 사용자에게 먼저 설정을 요청한다.
+
+---
+
+## 방법 1 — 행 번호로 저장 (Claude 에이전트)
+
+### 패턴: "N번 행 저장해줘" / "N번 폴더 만들어줘"
+
+#### Step 1 — 에어테이블 조회
+```bash
+python save_from_airtable.py --row N
+```
+출력에서 `RECORD_FOUND`, `업체명`, `제품명` 확인 후 사용자에게 보여준다:
+```
+📋 에어테이블 N번 행:
+   업체명: 삼성전자
+   제품명: 무선이어폰케이스
+```
+
+#### Step 2 — 받은함 파일 확인
+```bash
+python save_from_airtable.py --list
+```
+- 파일 있으면: "받은함에 파일 N개도 함께 이동할까요?"
+- 파일 없으면: 폴더만 생성
+
+#### Step 3 — 저장 실행
+파일 이동 포함:
+```bash
+python save_from_airtable.py --row N --files
+```
+폴더만 생성:
+```bash
+python save_from_airtable.py --row N
+```
+
+#### Step 4 — 결과 보고
+```
+✅ 완료!
+📁 260327_무선이어폰케이스_삼성전자
+📄 저장된 파일 3개:
+   ✔ 🧊 이어폰케이스.stl
+   ✔ 📕 도면.pdf
+   ✔ 📗 후가공지시서.xlsx
+
+➕ 다음 건도 있나요?
+```
+
+---
+
+## 방법 2 — 에어테이블 버튼 (자동화)
+
+버튼 클릭 시 에어테이블 자동화가 로컬 서버로 요청을 보내 폴더를 자동 생성한다.
+Claude가 직접 관여하지 않는다.
+
+### 에어테이블 자동화 설정 방법 (사용자에게 안내)
+1. 에어테이블 → 해당 테이블 → [Automations] 탭
+2. [+ Create automation] 클릭
+3. Trigger: **"When button clicked"** 선택 → 버튼 필드 지정
+4. Action: **"Run a script"** 선택 후 아래 스크립트 입력:
+
+```javascript
+// 에어테이블 자동화 스크립트
+const record = await input.config();
+const recordId = record.recordId;
+
+const response = await fetch("http://내PC_IP주소:5001", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ record_id: recordId })
+});
+const result = await response.json();
+console.log(result.message);
+```
+
+5. `내PC_IP주소`는 CMD에서 `ipconfig` 실행 후 IPv4 주소로 교체
+6. PC에서 `서버_시작.bat` 실행 (PC 켤 때마다 또는 시작프로그램에 등록)
+
+### PC 시작 시 자동 실행 등록 방법
+1. `Win + R` → `shell:startup` 입력 후 Enter
+2. 열린 폴더에 `서버_시작.bat` 바로가기 붙여넣기
+3. 이후 PC 켜면 서버 자동 실행
+
+---
+
+## 방법 3 — 에어테이블 행 붙여넣기
+
+### 패턴: 사용자가 탭 구분된 텍스트를 그대로 붙여넣었을 때
+
+에어테이블에서 행을 선택 후 복사(Ctrl+C)하면 탭으로 구분된 텍스트가 복사된다.
+사용자가 이 텍스트를 채팅창에 붙여넣으면 아래 절차를 실행한다.
+
+#### Step 1 — 파싱 확인
+Claude가 직접 탭 구분 텍스트에서 업체명(6번째 컬럼)과 아이템명(9번째 컬럼)을 추출한다.
+추출한 값을 사용자에게 먼저 확인받는다:
+```
+📋 파싱 결과:
+   업체명: 올로스코프
+   아이템명: 부품 2종
+   
+맞나요? (맞으면 "응" / 틀리면 수정해서 말씀해 주세요)
+```
+
+#### Step 2 — 스크립트 실행
+확인 후 아래 명령어를 실행한다 (붙여넣은 텍스트를 그대로 --paste 인자로 전달):
+```bash
+python save_from_paste.py --paste "붙여넣은_전체_텍스트"
+```
+받은함 파일도 함께 이동할 경우:
+```bash
+python save_from_paste.py --paste "붙여넣은_전체_텍스트" --files
+```
+
+#### Step 3 — 결과 보고
+방법 1과 동일하게 결과를 보고한다.
+
+#### 컬럼 위치가 다를 때
+`save_from_paste.py` 상단의 `COL_COMPANY`, `COL_PRODUCT` 값을 수정한다.
+확인 방법:
+```bash
+python save_from_paste.py --detect
+```
+
+---
+
+## 오류 대응
+
+| 오류 메시지 | 원인 | 해결 |
+|---|---|---|
+| `DRIVE_NOT_FOUND` | Z: 드라이브 연결 안 됨 | 서버 연결 확인 |
+| `AIRTABLE:` 오류 | API 키/Base ID 오류 | config.json 확인 |
+| `EMPTY_FIELD` | 업체명/제품명 셀이 비어있음 | 에어테이블 데이터 확인 |
+| `INBOX_EMPTY` | 받은함에 파일 없음 | C:\3D_받은함 확인 |
